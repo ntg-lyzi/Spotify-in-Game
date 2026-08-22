@@ -12,10 +12,16 @@ public class MusicPlayer {
 
 	private static final MusicPlayer INSTANCE = new MusicPlayer();
 
+	// Grace period after starting a track before we'll trust an "it's finished"
+	// signal — guards against any transient engine hiccup being mistaken for
+	// the track genuinely ending and causing an unwanted auto-switch.
+	private static final long MIN_PLAY_MILLIS = 2500;
+
 	private List<Path> tracks = new ArrayList<>();
 	private int currentIndex = -1;
 	private CustomMusicSound currentSound;
 	private boolean playing = false;
+	private long trackStartedAt = 0;
 	private final Random random = new Random();
 
 	private MusicPlayer() {
@@ -60,6 +66,7 @@ public class MusicPlayer {
 		currentSound = new CustomMusicSound(tracks.get(index), cfg.volume);
 		MinecraftClient.getInstance().getSoundManager().play(currentSound);
 		playing = true;
+		trackStartedAt = System.currentTimeMillis();
 		cfg.lastPlayed = tracks.get(index).getFileName().toString();
 		cfg.save();
 	}
@@ -78,6 +85,7 @@ public class MusicPlayer {
 		} else {
 			client.getSoundManager().play(currentSound);
 			playing = true;
+			trackStartedAt = System.currentTimeMillis();
 		}
 	}
 
@@ -116,12 +124,19 @@ public class MusicPlayer {
 	}
 
 	/**
-	 * Call once per client tick. Only advances to the next track once the mp3
-	 * decoder has genuinely reached end-of-file AND the engine has finished
-	 * draining its buffered audio — never on a transient buffering hiccup.
+	 * Call once per client tick. Only advances/stops once the mp3 decoder has
+	 * genuinely reached end-of-file AND the engine has finished draining its
+	 * buffered audio AND at least MIN_PLAY_MILLIS has passed since the track
+	 * started — this last guard prevents any transient engine hiccup from
+	 * being mistaken for the track actually ending.
 	 */
 	public void tick() {
 		if (playing && currentSound != null) {
+			long elapsed = System.currentTimeMillis() - trackStartedAt;
+			if (elapsed < MIN_PLAY_MILLIS) {
+				return;
+			}
+
 			boolean streamDone = currentSound.isStreamFinished();
 			boolean stillPlaying = MinecraftClient.getInstance().getSoundManager().isPlaying(currentSound);
 
