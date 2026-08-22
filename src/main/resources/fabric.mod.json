@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "spotifyingame",
+  "version": "${version}",
+  "name": "Spotify in Game",
+  "description": "Play your favorite music in game without any extra app.",
+  "authors": [
+    "Lyzi__"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "main": [
+      "com.lyzi.spotifyingame.SpotifyInGame"
+    ],
+    "client": [
+      "com.lyzi.spotifyingame.SpotifyInGameClient"
+    ]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.16.10",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
