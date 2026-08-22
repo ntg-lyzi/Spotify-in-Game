@@ -176,22 +176,40 @@ public class MusicPlayerScreen extends Screen {
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
 		context.fill(0, 0, this.width, this.height, COLOR_BG_DIM);
 
+		long t = System.currentTimeMillis();
+		boolean playing = MusicPlayer.get().isPlaying();
+
+		// Soft "breathing" glow around the whole panel while music plays — cheap: 1 extra fill.
+		if (playing) {
+			int breathe = (int) (18 + 14 * Math.sin(t / 500.0));
+			int glow = (breathe << 24) | 0x1DB954;
+			context.fill(panelX - 3, panelY - 3, panelX + PANEL_WIDTH + 3, panelY + PANEL_HEIGHT + 3, glow);
+		}
+
 		context.fill(panelX - 1, panelY - 1, panelX + PANEL_WIDTH + 1, panelY + PANEL_HEIGHT + 1, COLOR_BORDER);
 		context.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, COLOR_PANEL);
 
-		// Header with a slow animated hue-shift on the accent underline — cheap: 2 fills.
 		context.fillGradient(panelX, panelY, panelX + PANEL_WIDTH, panelY + 30, COLOR_PANEL_HEADER, 0xFF161616);
 		context.drawText(this.textRenderer, Text.literal("Spotify in Game"), panelX + 12, panelY + 11, COLOR_ACCENT, true);
-		int sweep = (int) ((System.currentTimeMillis() / 12) % (PANEL_WIDTH + 60)) - 60;
+
+		// Animated accent sweep under the header
+		int sweep = (int) ((t / 12) % (PANEL_WIDTH + 60)) - 60;
 		context.fill(panelX + Math.max(0, sweep), panelY + 29, panelX + Math.min(PANEL_WIDTH, sweep + 60), panelY + 31, COLOR_ACCENT);
 
 		String current = MusicPlayer.get().getCurrentTrackName();
 		String nowPlayingText = current != null
-				? (MusicPlayer.get().isPlaying() ? "Now Playing: " + current : "Paused: " + current)
+				? (playing ? "Now Playing: " + current : "Paused: " + current)
 				: "No track selected — pick one from the list below";
-		context.drawText(this.textRenderer, Text.literal(nowPlayingText), panelX + 12, panelY + 38, COLOR_TEXT, false);
 
-		if (MusicPlayer.get().isPlaying()) {
+		// Gentle pulsing brightness on the now-playing text
+		int textColor = COLOR_TEXT;
+		if (playing) {
+			int pulse = 200 + (int) (55 * Math.sin(t / 400.0));
+			textColor = (0xFF << 24) | (pulse << 16) | (pulse << 8) | pulse;
+		}
+		context.drawText(this.textRenderer, Text.literal(nowPlayingText), panelX + 12, panelY + 38, textColor, false);
+
+		if (playing) {
 			drawEqualizer(context, panelX + PANEL_WIDTH - 34, panelY + 36);
 		}
 
