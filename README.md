@@ -23,7 +23,7 @@ needed.
 
 ```
 .minecraft/config/spotifyingame/music/   <- put your .mp3 files here
-.minecraft/config/spotifyingame/config.json  <- volume/shuffle/repeat settings (auto-created)
+.minecraft/config/spotifyingame/config.json  <- volume/shuffle/repeat settings
 ```
 
 This is the same path on desktop and on mobile launchers — just copy your
