@@ -14,22 +14,8 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-/**
- * Streams a .mp3 file as raw 16-bit PCM into Minecraft's sound engine.
- *
- * IMPORTANT: This deliberately avoids javax.sound.sampled.Clip / Mixer / AudioSystem
- * for actual PLAYBACK. Those rely on the platform's native audio mixer, which is
- * usually missing or broken on PojavLauncher / mobile Java runtimes (that's the
- * "IllegalArgumentException: no line found" you see in other MP3 mods).
- *
- * Instead we only use JLayer (pure Java, no native libs) to DECODE the mp3 bytes
- * into PCM, and hand that PCM straight to Minecraft's own AudioStream pipeline,
- * which plays it back through LWJGL/OpenAL — the exact same engine Minecraft
- * already uses for every other sound, on PC and on Android/PojavLauncher alike.
- */
 public class Mp3AudioStream implements AudioStream {
 
-	// Fixed output format: 16-bit signed PCM, little endian, stereo, 44.1kHz.
 	private static final int SAMPLE_RATE = 44100;
 	private static final int CHANNELS = 2;
 
@@ -42,6 +28,9 @@ public class Mp3AudioStream implements AudioStream {
 	private byte[] pendingBytes = new byte[0];
 	private int pendingOffset = 0;
 	private boolean sourceExhausted = false;
+
+	/** True once every last byte of decoded PCM has actually been handed to the engine. */
+	public volatile boolean finished = false;
 
 	public Mp3AudioStream(InputStream mp3InputStream) {
 		this.sourceStream = mp3InputStream;
@@ -61,6 +50,7 @@ public class Mp3AudioStream implements AudioStream {
 
 		int available = pendingBytes.length - pendingOffset;
 		if (available <= 0) {
+			finished = true;
 			throw new EOFException("End of MP3 stream");
 		}
 
@@ -69,10 +59,14 @@ public class Mp3AudioStream implements AudioStream {
 		buffer.put(pendingBytes, pendingOffset, toReturn);
 		pendingOffset += toReturn;
 		buffer.flip();
+
+		if (sourceExhausted && (pendingBytes.length - pendingOffset) <= 0) {
+			finished = true;
+		}
+
 		return buffer;
 	}
 
-	/** Decodes MP3 frames until we have at least `needed` bytes of PCM buffered (or the file ends). */
 	private void fill(int needed) {
 		int haveLeft = pendingBytes.length - pendingOffset;
 		if (haveLeft >= needed) {
@@ -100,7 +94,6 @@ public class Mp3AudioStream implements AudioStream {
 				appendPcm(output);
 				bitstream.closeFrame();
 			} catch (Exception decodeError) {
-				// A single corrupt frame shouldn't kill the whole stream — skip it.
 				sourceExhausted = true;
 				break;
 			}
@@ -120,7 +113,6 @@ public class Mp3AudioStream implements AudioStream {
 				out.putShort(pcm[i]);
 			}
 		} else if (srcChannels == 1) {
-			// Duplicate mono samples to stereo so the declared AudioFormat always matches.
 			for (int i = 0; i < len; i++) {
 				out.putShort(pcm[i]);
 				out.putShort(pcm[i]);
@@ -139,8 +131,7 @@ public class Mp3AudioStream implements AudioStream {
 		try {
 			bitstream.close();
 		} catch (Exception ignored) {
-			// javazoom throws a checked BitstreamException, not IOException — swallow on close.
 		}
 		sourceStream.close();
 	}
-}
+			}
