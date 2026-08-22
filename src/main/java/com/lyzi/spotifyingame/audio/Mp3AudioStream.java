@@ -65,7 +65,7 @@ public class Mp3AudioStream implements AudioStream {
 		}
 
 		int toReturn = Math.min(size, available);
-		ByteBuffer buffer = ByteBuffer.allocate(toReturn).order(ByteOrder.LITTLE_ENDIAN);
+		ByteBuffer buffer = ByteBuffer.allocateDirect(toReturn).order(ByteOrder.LITTLE_ENDIAN);
 		buffer.put(pendingBytes, pendingOffset, toReturn);
 		pendingOffset += toReturn;
 		buffer.flip();
