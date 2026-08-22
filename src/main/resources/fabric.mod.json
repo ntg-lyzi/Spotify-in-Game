@@ -9,6 +9,7 @@
   ],
   "contact": {},
   "license": "MIT",
+  "icon": "assets/spotifyingame/icon.png",
   "environment": "client",
   "entrypoints": {
     "main": [
