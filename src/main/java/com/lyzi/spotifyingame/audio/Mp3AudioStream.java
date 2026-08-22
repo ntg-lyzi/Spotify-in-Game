@@ -1,5 +1,6 @@
 package com.lyzi.spotifyingame.audio;
 
+import com.lyzi.spotifyingame.SpotifyInGame;
 import javazoom.jl.decoder.Bitstream;
 import javazoom.jl.decoder.Decoder;
 import javazoom.jl.decoder.Header;
@@ -19,34 +20,35 @@ import java.nio.ByteOrder;
 /**
  * Streams a .mp3 file as raw 16-bit PCM into Minecraft's sound engine (via LWJGL/OpenAL),
  * decoding with JLayer (pure Java, no native libs — safe on PojavLauncher/Android too).
- *
- * Two important robustness fixes baked in here:
- * 1. Skips leading ID3v2 tags (common on real-world mp3s, often containing embedded
- *    album art) — JLayer's frame sync can choke on these otherwise, causing the whole
- *    stream to look "finished" after only a few seconds.
- * 2. A single bad/unsupported frame no longer kills the whole stream — we skip past
- *    isolated decode errors and keep going, only giving up after many in a row.
  */
 public class Mp3AudioStream implements AudioStream {
 
 	private static final int SAMPLE_RATE = 44100;
 	private static final int CHANNELS = 2;
-	private static final int MAX_CONSECUTIVE_ERRORS = 30;
+	private static final int MAX_CONSECUTIVE_ERRORS = 50;
 
 	private final AudioFormat format;
 	private final Bitstream bitstream;
 	private final Decoder decoder;
 	private final InputStream sourceStream;
+	private final String debugName;
 
 	private final ByteArrayOutputStream pending = new ByteArrayOutputStream();
 	private byte[] pendingBytes = new byte[0];
 	private int pendingOffset = 0;
 	private boolean sourceExhausted = false;
 	private int consecutiveErrors = 0;
+	private int totalFramesDecoded = 0;
+	private boolean loggedFirstError = false;
 
 	public volatile boolean finished = false;
 
 	public Mp3AudioStream(InputStream mp3InputStream) throws IOException {
+		this(mp3InputStream, "unknown");
+	}
+
+	public Mp3AudioStream(InputStream mp3InputStream, String debugName) throws IOException {
+		this.debugName = debugName;
 		InputStream skippedTag = skipId3v2(new BufferedInputStream(mp3InputStream, 8192));
 		this.sourceStream = skippedTag;
 		this.bitstream = new Bitstream(skippedTag);
@@ -54,7 +56,6 @@ public class Mp3AudioStream implements AudioStream {
 		this.format = new AudioFormat(SAMPLE_RATE, 16, CHANNELS, true, false);
 	}
 
-	/** Skips a leading ID3v2 tag block if present, so JLayer starts right at the first real mp3 frame. */
 	private static InputStream skipId3v2(InputStream in) throws IOException {
 		PushbackInputStream pin = new PushbackInputStream(in, 10);
 		byte[] header = new byte[10];
@@ -86,6 +87,7 @@ public class Mp3AudioStream implements AudioStream {
 		int available = pendingBytes.length - pendingOffset;
 		if (available <= 0) {
 			finished = true;
+			SpotifyInGame.LOGGER.info("[{}] Stream ended after decoding {} frames", debugName, totalFramesDecoded);
 			throw new EOFException("End of MP3 stream");
 		}
 
@@ -121,6 +123,7 @@ public class Mp3AudioStream implements AudioStream {
 			try {
 				Header header = bitstream.readFrame();
 				if (header == null) {
+					SpotifyInGame.LOGGER.info("[{}] readFrame() returned null (natural end) after {} frames", debugName, totalFramesDecoded);
 					sourceExhausted = true;
 					break;
 				}
@@ -129,14 +132,21 @@ public class Mp3AudioStream implements AudioStream {
 				appendPcm(output);
 				bitstream.closeFrame();
 				consecutiveErrors = 0;
+				totalFramesDecoded++;
 			} catch (Exception decodeError) {
-				// Skip past a bad/unsupported frame instead of giving up on the whole track.
 				consecutiveErrors++;
+				if (!loggedFirstError) {
+					loggedFirstError = true;
+					SpotifyInGame.LOGGER.warn("[{}] Frame decode error after {} good frames: {}: {}",
+							debugName, totalFramesDecoded, decodeError.getClass().getSimpleName(), decodeError.getMessage());
+				}
 				try {
 					bitstream.closeFrame();
 				} catch (Exception ignored) {
 				}
 				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+					SpotifyInGame.LOGGER.warn("[{}] Giving up after {} consecutive decode errors (decoded {} good frames total)",
+							debugName, consecutiveErrors, totalFramesDecoded);
 					sourceExhausted = true;
 					break;
 				}
