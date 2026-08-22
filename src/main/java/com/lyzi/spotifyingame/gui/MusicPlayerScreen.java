@@ -34,6 +34,7 @@ public class MusicPlayerScreen extends Screen {
 	private static final int PANEL_HEIGHT = 280;
 	private static final int ROW_HEIGHT = 22;
 	private static final int ROWS_PER_PAGE = 6;
+	private static final int PARTICLE_COUNT = 10;
 
 	private int panelX, panelY;
 	private int page = 0;
@@ -172,6 +173,13 @@ public class MusicPlayerScreen extends Screen {
 		return Text.literal("Repeat: " + (ModConfig.get().repeat ? "On" : "Off"));
 	}
 
+	private static String formatTime(long millis) {
+		long totalSec = millis / 1000;
+		long min = totalSec / 60;
+		long sec = totalSec % 60;
+		return min + ":" + (sec < 10 ? "0" : "") + sec;
+	}
+
 	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
 		context.fill(0, 0, this.width, this.height, COLOR_BG_DIM);
@@ -179,7 +187,6 @@ public class MusicPlayerScreen extends Screen {
 		long t = System.currentTimeMillis();
 		boolean playing = MusicPlayer.get().isPlaying();
 
-		// Soft "breathing" glow around the whole panel while music plays — cheap: 1 extra fill.
 		if (playing) {
 			int breathe = (int) (18 + 14 * Math.sin(t / 500.0));
 			int glow = (breathe << 24) | 0x1DB954;
@@ -189,10 +196,13 @@ public class MusicPlayerScreen extends Screen {
 		context.fill(panelX - 1, panelY - 1, panelX + PANEL_WIDTH + 1, panelY + PANEL_HEIGHT + 1, COLOR_BORDER);
 		context.fill(panelX, panelY, panelX + PANEL_WIDTH, panelY + PANEL_HEIGHT, COLOR_PANEL);
 
+		if (playing) {
+			drawFloatingParticles(context, t);
+		}
+
 		context.fillGradient(panelX, panelY, panelX + PANEL_WIDTH, panelY + 30, COLOR_PANEL_HEADER, 0xFF161616);
 		context.drawText(this.textRenderer, Text.literal("Spotify in Game"), panelX + 12, panelY + 11, COLOR_ACCENT, true);
 
-		// Animated accent sweep under the header
 		int sweep = (int) ((t / 12) % (PANEL_WIDTH + 60)) - 60;
 		context.fill(panelX + Math.max(0, sweep), panelY + 29, panelX + Math.min(PANEL_WIDTH, sweep + 60), panelY + 31, COLOR_ACCENT);
 
@@ -201,7 +211,6 @@ public class MusicPlayerScreen extends Screen {
 				? (playing ? "Now Playing: " + current : "Paused: " + current)
 				: "No track selected — pick one from the list below";
 
-		// Gentle pulsing brightness on the now-playing text
 		int textColor = COLOR_TEXT;
 		if (playing) {
 			int pulse = 200 + (int) (55 * Math.sin(t / 400.0));
@@ -209,8 +218,13 @@ public class MusicPlayerScreen extends Screen {
 		}
 		context.drawText(this.textRenderer, Text.literal(nowPlayingText), panelX + 12, panelY + 38, textColor, false);
 
+		if (current != null) {
+			String timeText = formatTime(MusicPlayer.get().getElapsedMillis());
+			context.drawText(this.textRenderer, Text.literal(timeText), panelX + PANEL_WIDTH - 76, panelY + 38, COLOR_TEXT_DIM, false);
+		}
+
 		if (playing) {
-			drawEqualizer(context, panelX + PANEL_WIDTH - 34, panelY + 36);
+			drawEqualizer(context, panelX + PANEL_WIDTH - 40, panelY + 36);
 		}
 
 		int listX = panelX + 8;
@@ -232,7 +246,30 @@ public class MusicPlayerScreen extends Screen {
 				panelX + 12, panelY + PANEL_HEIGHT + 34, COLOR_TEXT_DIM, false);
 	}
 
-	/** Small animated bar-equalizer next to "Now Playing" — 4 cheap fills, no allocations beyond primitives. */
+	/**
+	 * Small rising particles drifting up the left/right margins while music plays.
+	 * Purely decorative — each is one 2x2 fill, ~10 total, negligible cost.
+	 */
+	private void drawFloatingParticles(DrawContext context, long t) {
+		int leftLaneX = panelX + 3;
+		int rightLaneX = panelX + PANEL_WIDTH - 5;
+
+		for (int i = 0; i < PARTICLE_COUNT; i++) {
+			double speed = 40 + (i % 3) * 15;
+			double seedOffset = i * 987.0;
+			double cycle = ((t + seedOffset) / speed) % PANEL_HEIGHT;
+			int py = (int) (panelY + PANEL_HEIGHT - cycle);
+			int px = (i % 2 == 0 ? leftLaneX : rightLaneX) + ((i * 13) % 6) - 3;
+
+			double fadeFactor = 1.0 - (cycle / PANEL_HEIGHT);
+			int alpha = (int) (90 * fadeFactor);
+			if (alpha <= 0 || py < panelY + 30 || py > panelY + PANEL_HEIGHT) continue;
+
+			int color = (alpha << 24) | 0x1DB954;
+			context.fill(px, py, px + 2, py + 2, color);
+		}
+	}
+
 	private void drawEqualizer(DrawContext context, int x, int y) {
 		long t = System.currentTimeMillis();
 		for (int bar = 0; bar < 4; bar++) {
