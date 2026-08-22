@@ -20,11 +20,16 @@ import java.nio.ByteOrder;
 /**
  * Streams a .mp3 file as raw 16-bit PCM into Minecraft's sound engine (via LWJGL/OpenAL),
  * decoding with JLayer (pure Java, no native libs — safe on PojavLauncher/Android too).
+ *
+ * Supports "resuming" from an arbitrary playback position: since mp3 has no cheap random
+ * seek, we fast-forward-decode (and discard) audio up to the target position at construction
+ * time. This is far faster than real-time, so resuming feels instant.
  */
 public class Mp3AudioStream implements AudioStream {
 
 	private static final int SAMPLE_RATE = 44100;
 	private static final int CHANNELS = 2;
+	private static final int BYTES_PER_MS = (SAMPLE_RATE * CHANNELS * 2) / 1000;
 	private static final int MAX_CONSECUTIVE_ERRORS = 50;
 
 	private final AudioFormat format;
@@ -32,6 +37,7 @@ public class Mp3AudioStream implements AudioStream {
 	private final Decoder decoder;
 	private final InputStream sourceStream;
 	private final String debugName;
+	private final long baseMillis;
 
 	private final ByteArrayOutputStream pending = new ByteArrayOutputStream();
 	private byte[] pendingBytes = new byte[0];
@@ -40,20 +46,22 @@ public class Mp3AudioStream implements AudioStream {
 	private int consecutiveErrors = 0;
 	private int totalFramesDecoded = 0;
 	private boolean loggedFirstError = false;
+	private long bytesServed = 0;
 
 	public volatile boolean finished = false;
 
-	public Mp3AudioStream(InputStream mp3InputStream) throws IOException {
-		this(mp3InputStream, "unknown");
-	}
-
-	public Mp3AudioStream(InputStream mp3InputStream, String debugName) throws IOException {
+	public Mp3AudioStream(InputStream mp3InputStream, String debugName, long startAtMillis) throws IOException {
 		this.debugName = debugName;
+		this.baseMillis = Math.max(0, startAtMillis);
 		InputStream skippedTag = skipId3v2(new BufferedInputStream(mp3InputStream, 8192));
 		this.sourceStream = skippedTag;
 		this.bitstream = new Bitstream(skippedTag);
 		this.decoder = new Decoder();
 		this.format = new AudioFormat(SAMPLE_RATE, 16, CHANNELS, true, false);
+
+		if (baseMillis > 0) {
+			skipAheadBytes(baseMillis * BYTES_PER_MS);
+		}
 	}
 
 	private static InputStream skipId3v2(InputStream in) throws IOException {
@@ -73,6 +81,19 @@ public class Mp3AudioStream implements AudioStream {
 			pin.unread(header, 0, read);
 		}
 		return pin;
+	}
+
+	/** Fast-forwards decode output, discarding it, until we've thrown away the given number of PCM bytes. */
+	private void skipAheadBytes(long bytesToSkip) {
+		long skipped = 0;
+		while (skipped < bytesToSkip && !sourceExhausted) {
+			fill(8192);
+			int avail = pendingBytes.length - pendingOffset;
+			if (avail <= 0) break;
+			long toDiscard = Math.min(avail, bytesToSkip - skipped);
+			pendingOffset += (int) toDiscard;
+			skipped += toDiscard;
+		}
 	}
 
 	@Override
@@ -95,6 +116,7 @@ public class Mp3AudioStream implements AudioStream {
 		ByteBuffer buffer = ByteBuffer.allocateDirect(toReturn).order(ByteOrder.LITTLE_ENDIAN);
 		buffer.put(pendingBytes, pendingOffset, toReturn);
 		pendingOffset += toReturn;
+		bytesServed += toReturn;
 		buffer.flip();
 
 		if (sourceExhausted && (pendingBytes.length - pendingOffset) <= 0) {
@@ -102,6 +124,11 @@ public class Mp3AudioStream implements AudioStream {
 		}
 
 		return buffer;
+	}
+
+	/** Elapsed playback position in this track, including any resume offset. */
+	public long getElapsedMillis() {
+		return baseMillis + (bytesServed / BYTES_PER_MS);
 	}
 
 	private void fill(int needed) {
@@ -123,7 +150,6 @@ public class Mp3AudioStream implements AudioStream {
 			try {
 				Header header = bitstream.readFrame();
 				if (header == null) {
-					SpotifyInGame.LOGGER.info("[{}] readFrame() returned null (natural end) after {} frames", debugName, totalFramesDecoded);
 					sourceExhausted = true;
 					break;
 				}
@@ -145,8 +171,6 @@ public class Mp3AudioStream implements AudioStream {
 				} catch (Exception ignored) {
 				}
 				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-					SpotifyInGame.LOGGER.warn("[{}] Giving up after {} consecutive decode errors (decoded {} good frames total)",
-							debugName, consecutiveErrors, totalFramesDecoded);
 					sourceExhausted = true;
 					break;
 				}
