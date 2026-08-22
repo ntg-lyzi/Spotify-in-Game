@@ -6,6 +6,7 @@ import net.minecraft.client.sound.AbstractSoundInstance;
 import net.minecraft.client.sound.AudioStream;
 import net.minecraft.client.sound.SoundInstance;
 import net.minecraft.client.sound.SoundLoader;
+import net.minecraft.client.sound.TickableSoundInstance;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.util.Identifier;
 
@@ -15,10 +16,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 
-public class CustomMusicSound extends AbstractSoundInstance implements FabricSoundInstance {
+/**
+ * Implements TickableSoundInstance so Minecraft's sound engine re-reads our
+ * volume every tick — a plain (non-tickable) SoundInstance's volume is only
+ * read ONCE when playback starts, which is why volume changes did nothing
+ * while a track was already playing.
+ */
+public class CustomMusicSound extends AbstractSoundInstance implements FabricSoundInstance, TickableSoundInstance {
 
 	private final Path mp3File;
 	private volatile Mp3AudioStream stream;
+	private boolean done = false;
 
 	public CustomMusicSound(Path mp3File, float volume) {
 		super(SpotifyInGame.MUSIC_SOUND_ID, SoundCategory.MASTER, SoundInstance.createRandom());
@@ -48,13 +56,23 @@ public class CustomMusicSound extends AbstractSoundInstance implements FabricSou
 		}
 	}
 
-	/** True once the mp3 has been fully decoded AND every byte handed to the audio engine. */
 	public boolean isStreamFinished() {
 		return stream != null && stream.finished;
 	}
 
-	/** Live-updates playback volume without needing to restart the track. */
 	public void setLiveVolume(float newVolume) {
 		this.volume = newVolume;
+	}
+
+	@Override
+	public boolean isDone() {
+		return done;
+	}
+
+	@Override
+	public void tick() {
+		if (stream != null && stream.finished) {
+			done = true;
+		}
 	}
 }
