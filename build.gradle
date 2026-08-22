@@ -11,16 +11,6 @@ repositories {
 	mavenCentral()
 }
 
-loom {
-	splitEnvironmentSourceSets()
-
-	mods {
-		"spotifyingame" {
-			sourceSet sourceSets.main
-			sourceSet sourceSets.client
-		}
-	}
-}
 
 dependencies {
 	// To change the versions see the gradle.properties file
