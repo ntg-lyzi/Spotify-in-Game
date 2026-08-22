@@ -1,3 +1,6 @@
+## Spotify In Game
+This mod will help you too play music directly through your local files.
+
 Press **F6** in-game to open a music player GUI. Drop your `.mp3` files into the
 config folder, hit refresh, and play them straight from Minecraft's own sound
 engine — works on PC Java **and** mobile Java launchers (PojavLauncher etc.).
