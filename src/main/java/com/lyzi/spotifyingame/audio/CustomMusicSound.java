@@ -45,7 +45,7 @@ public class CustomMusicSound extends AbstractSoundInstance implements FabricSou
 	public CompletableFuture<AudioStream> getAudioStream(SoundLoader loader, Identifier id, boolean repeatInstantly) {
 		try {
 			InputStream in = Files.newInputStream(mp3File);
-			Mp3AudioStream s = new Mp3AudioStream(in);
+			Mp3AudioStream s = new Mp3AudioStream(in, mp3File.getFileName().toString());
 			this.stream = s;
 			return CompletableFuture.completedFuture(s);
 		} catch (IOException e) {
