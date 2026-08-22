@@ -1,4 +1,3 @@
-cat > src/main/java/com/lyzi/spotifyingame/audio/Mp3AudioStream.java << 'ENDOFFILE'
 package com.lyzi.spotifyingame.audio;
 
 import javazoom.jl.decoder.Bitstream;
@@ -15,8 +14,22 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+/**
+ * Streams a .mp3 file as raw 16-bit PCM into Minecraft's sound engine.
+ *
+ * IMPORTANT: This deliberately avoids javax.sound.sampled.Clip / Mixer / AudioSystem
+ * for actual PLAYBACK. Those rely on the platform's native audio mixer, which is
+ * usually missing or broken on PojavLauncher / mobile Java runtimes (that's the
+ * "IllegalArgumentException: no line found" you see in other MP3 mods).
+ *
+ * Instead we only use JLayer (pure Java, no native libs) to DECODE the mp3 bytes
+ * into PCM, and hand that PCM straight to Minecraft's own AudioStream pipeline,
+ * which plays it back through LWJGL/OpenAL — the exact same engine Minecraft
+ * already uses for every other sound, on PC and on Android/PojavLauncher alike.
+ */
 public class Mp3AudioStream implements AudioStream {
 
+	// Fixed output format: 16-bit signed PCM, little endian, stereo, 44.1kHz.
 	private static final int SAMPLE_RATE = 44100;
 	private static final int CHANNELS = 2;
 
@@ -59,6 +72,7 @@ public class Mp3AudioStream implements AudioStream {
 		return buffer;
 	}
 
+	/** Decodes MP3 frames until we have at least `needed` bytes of PCM buffered (or the file ends). */
 	private void fill(int needed) {
 		int haveLeft = pendingBytes.length - pendingOffset;
 		if (haveLeft >= needed) {
@@ -86,6 +100,7 @@ public class Mp3AudioStream implements AudioStream {
 				appendPcm(output);
 				bitstream.closeFrame();
 			} catch (Exception decodeError) {
+				// A single corrupt frame shouldn't kill the whole stream — skip it.
 				sourceExhausted = true;
 				break;
 			}
@@ -105,6 +120,7 @@ public class Mp3AudioStream implements AudioStream {
 				out.putShort(pcm[i]);
 			}
 		} else if (srcChannels == 1) {
+			// Duplicate mono samples to stereo so the declared AudioFormat always matches.
 			for (int i = 0; i < len; i++) {
 				out.putShort(pcm[i]);
 				out.putShort(pcm[i]);
@@ -123,8 +139,8 @@ public class Mp3AudioStream implements AudioStream {
 		try {
 			bitstream.close();
 		} catch (Exception ignored) {
+			// javazoom throws a checked BitstreamException, not IOException — swallow on close.
 		}
 		sourceStream.close();
 	}
 }
-ENDOFFILE
