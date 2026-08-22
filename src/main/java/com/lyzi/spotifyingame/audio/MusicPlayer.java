@@ -47,7 +47,7 @@ public class MusicPlayer {
 			return null;
 		}
 		String fileName = tracks.get(currentIndex).getFileName().toString();
-		return fileName.substring(0, fileName.length() - 4); // strip ".mp3"
+		return fileName.substring(0, fileName.length() - 4);
 	}
 
 	public void playIndex(int index) {
@@ -111,16 +111,21 @@ public class MusicPlayer {
 		cfg.volume = volume;
 		cfg.save();
 		if (currentSound != null) {
-			// Volume changes apply on next track start; live volume updates require
-			// re-triggering playback since AbstractSoundInstance volume isn't hot-swappable.
+			currentSound.setLiveVolume(volume);
 		}
 	}
 
-	/** Call once per client tick to auto-advance when a track finishes. */
+	/**
+	 * Call once per client tick. Only advances to the next track once the mp3
+	 * decoder has genuinely reached end-of-file AND the engine has finished
+	 * draining its buffered audio — never on a transient buffering hiccup.
+	 */
 	public void tick() {
 		if (playing && currentSound != null) {
+			boolean streamDone = currentSound.isStreamFinished();
 			boolean stillPlaying = MinecraftClient.getInstance().getSoundManager().isPlaying(currentSound);
-			if (!stillPlaying) {
+
+			if (streamDone && !stillPlaying) {
 				if (ModConfig.get().repeat) {
 					next();
 				} else {
