@@ -16,21 +16,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Implements TickableSoundInstance so Minecraft's sound engine re-reads our
- * volume every tick — a plain (non-tickable) SoundInstance's volume is only
- * read ONCE when playback starts, which is why volume changes did nothing
- * while a track was already playing.
- */
 public class CustomMusicSound extends AbstractSoundInstance implements FabricSoundInstance, TickableSoundInstance {
 
 	private final Path mp3File;
+	private final long startAtMillis;
 	private volatile Mp3AudioStream stream;
 	private boolean done = false;
 
 	public CustomMusicSound(Path mp3File, float volume) {
+		this(mp3File, volume, 0);
+	}
+
+	/** startAtMillis lets playback resume partway through the track instead of from the beginning. */
+	public CustomMusicSound(Path mp3File, float volume, long startAtMillis) {
 		super(SpotifyInGame.MUSIC_SOUND_ID, SoundCategory.MASTER, SoundInstance.createRandom());
 		this.mp3File = mp3File;
+		this.startAtMillis = startAtMillis;
 		this.volume = volume;
 		this.repeat = false;
 		this.repeatDelay = 0;
@@ -45,7 +46,7 @@ public class CustomMusicSound extends AbstractSoundInstance implements FabricSou
 	public CompletableFuture<AudioStream> getAudioStream(SoundLoader loader, Identifier id, boolean repeatInstantly) {
 		try {
 			InputStream in = Files.newInputStream(mp3File);
-			Mp3AudioStream s = new Mp3AudioStream(in, mp3File.getFileName().toString());
+			Mp3AudioStream s = new Mp3AudioStream(in, mp3File.getFileName().toString(), startAtMillis);
 			this.stream = s;
 			return CompletableFuture.completedFuture(s);
 		} catch (IOException e) {
@@ -58,6 +59,11 @@ public class CustomMusicSound extends AbstractSoundInstance implements FabricSou
 
 	public boolean isStreamFinished() {
 		return stream != null && stream.finished;
+	}
+
+	/** Current playback position in this track, in milliseconds (includes any resume offset). */
+	public long getElapsedMillis() {
+		return stream != null ? stream.getElapsedMillis() : startAtMillis;
 	}
 
 	public void setLiveVolume(float newVolume) {
