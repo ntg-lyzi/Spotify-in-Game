@@ -17,8 +17,16 @@ public class MusicPlayer {
 	private int currentIndex = -1;
 	private CustomMusicSound currentSound;
 	private boolean playing = false;
-	private long trackStartedAt = 0;
-	private long pausedAtMillis = 0;
+
+	// Wall-clock based position tracking. bufferedAtMillis is how much of the
+	// track had elapsed (in real time) when the current playback segment began;
+	// segmentStartedAt is the wall-clock time that segment began. This tracks
+	// actual audible position, NOT how far ahead the engine has buffered —
+	// using the buffered-bytes count instead caused resume to jump ahead of
+	// where the user actually heard it pause.
+	private long trackElapsedBaseMillis = 0;
+	private long segmentStartedAt = 0;
+
 	private final Random random = new Random();
 
 	private MusicPlayer() {
@@ -53,6 +61,15 @@ public class MusicPlayer {
 		return fileName.substring(0, fileName.length() - 4);
 	}
 
+	/** Actual audible elapsed position in the current track, in milliseconds. */
+	public long getElapsedMillis() {
+		if (currentSound == null) return 0;
+		if (playing) {
+			return trackElapsedBaseMillis + (System.currentTimeMillis() - segmentStartedAt);
+		}
+		return trackElapsedBaseMillis;
+	}
+
 	/** Starts a track from the beginning (used for picking a track, Next, Prev). */
 	public void playIndex(int index) {
 		if (index < 0 || index >= tracks.size()) {
@@ -60,12 +77,12 @@ public class MusicPlayer {
 		}
 		stop();
 		currentIndex = index;
-		pausedAtMillis = 0;
+		trackElapsedBaseMillis = 0;
 		ModConfig cfg = ModConfig.get();
 		currentSound = new CustomMusicSound(tracks.get(index), cfg.volume, 0);
 		MinecraftClient.getInstance().getSoundManager().play(currentSound);
 		playing = true;
-		trackStartedAt = System.currentTimeMillis();
+		segmentStartedAt = System.currentTimeMillis();
 		cfg.lastPlayed = tracks.get(index).getFileName().toString();
 		cfg.save();
 	}
@@ -80,15 +97,15 @@ public class MusicPlayer {
 		}
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (playing) {
-			pausedAtMillis = currentSound.getElapsedMillis();
+			trackElapsedBaseMillis += System.currentTimeMillis() - segmentStartedAt;
 			client.getSoundManager().stop(currentSound);
 			playing = false;
 		} else {
 			ModConfig cfg = ModConfig.get();
-			currentSound = new CustomMusicSound(tracks.get(currentIndex), cfg.volume, pausedAtMillis);
+			currentSound = new CustomMusicSound(tracks.get(currentIndex), cfg.volume, trackElapsedBaseMillis);
 			client.getSoundManager().play(currentSound);
 			playing = true;
-			trackStartedAt = System.currentTimeMillis();
+			segmentStartedAt = System.currentTimeMillis();
 		}
 	}
 
@@ -98,7 +115,7 @@ public class MusicPlayer {
 			currentSound = null;
 		}
 		playing = false;
-		pausedAtMillis = 0;
+		trackElapsedBaseMillis = 0;
 	}
 
 	public void next() {
@@ -127,15 +144,9 @@ public class MusicPlayer {
 		}
 	}
 
-
-	public long getElapsedMillis() {
-		if (currentSound == null) return 0;
-		return playing ? currentSound.getElapsedMillis() : pausedAtMillis;
-	}
-
 	public void tick() {
 		if (playing && currentSound != null) {
-			long elapsed = System.currentTimeMillis() - trackStartedAt;
+			long elapsed = System.currentTimeMillis() - segmentStartedAt;
 			if (elapsed < MIN_PLAY_MILLIS) {
 				return;
 			}
@@ -148,7 +159,7 @@ public class MusicPlayer {
 					next();
 				} else {
 					playing = false;
-					pausedAtMillis = 0;
+					trackElapsedBaseMillis = 0;
 				}
 			}
 		}
