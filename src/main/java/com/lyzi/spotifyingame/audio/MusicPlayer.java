@@ -18,12 +18,6 @@ public class MusicPlayer {
 	private CustomMusicSound currentSound;
 	private boolean playing = false;
 
-	// Wall-clock based position tracking. bufferedAtMillis is how much of the
-	// track had elapsed (in real time) when the current playback segment began;
-	// segmentStartedAt is the wall-clock time that segment began. This tracks
-	// actual audible position, NOT how far ahead the engine has buffered —
-	// using the buffered-bytes count instead caused resume to jump ahead of
-	// where the user actually heard it pause.
 	private long trackElapsedBaseMillis = 0;
 	private long segmentStartedAt = 0;
 
@@ -61,7 +55,6 @@ public class MusicPlayer {
 		return fileName.substring(0, fileName.length() - 4);
 	}
 
-	/** Actual audible elapsed position in the current track, in milliseconds. */
 	public long getElapsedMillis() {
 		if (currentSound == null) return 0;
 		if (playing) {
@@ -70,7 +63,6 @@ public class MusicPlayer {
 		return trackElapsedBaseMillis;
 	}
 
-	/** Starts a track from the beginning (used for picking a track, Next, Prev). */
 	public void playIndex(int index) {
 		if (index < 0 || index >= tracks.size()) {
 			return;
@@ -87,7 +79,6 @@ public class MusicPlayer {
 		cfg.save();
 	}
 
-	/** Pauses in place, or resumes from the exact position it was paused at. */
 	public void togglePlayPause() {
 		if (currentSound == null) {
 			if (!tracks.isEmpty()) {
@@ -144,6 +135,14 @@ public class MusicPlayer {
 		}
 	}
 
+	/**
+	 * Call once per client tick. Handles three cases when playback is expected
+	 * to be running but the engine says it isn't:
+	 *  1. The mp3 genuinely finished decoding -> advance/stop per repeat setting.
+	 *  2. It stopped for some OTHER reason (e.g. the server sent a resource/config
+	 *     reload, which makes vanilla clear all active sounds) -> automatically
+	 *     resume from the same position instead of leaving music silently dead.
+	 */
 	public void tick() {
 		if (playing && currentSound != null) {
 			long elapsed = System.currentTimeMillis() - segmentStartedAt;
@@ -154,14 +153,29 @@ public class MusicPlayer {
 			boolean streamDone = currentSound.isStreamFinished();
 			boolean stillPlaying = MinecraftClient.getInstance().getSoundManager().isPlaying(currentSound);
 
-			if (streamDone && !stillPlaying) {
-				if (ModConfig.get().repeat) {
-					next();
+			if (!stillPlaying) {
+				if (streamDone) {
+					if (ModConfig.get().repeat) {
+						next();
+					} else {
+						playing = false;
+						trackElapsedBaseMillis = 0;
+					}
 				} else {
-					playing = false;
-					trackElapsedBaseMillis = 0;
+					// Stopped unexpectedly (not by us, not because it finished) —
+					// most likely the server triggered a reconfigure/resource
+					// reload and vanilla cleared all sounds. Resume automatically.
+					resumeAfterUnexpectedStop();
 				}
 			}
 		}
+	}
+
+	private void resumeAfterUnexpectedStop() {
+		trackElapsedBaseMillis += System.currentTimeMillis() - segmentStartedAt;
+		ModConfig cfg = ModConfig.get();
+		currentSound = new CustomMusicSound(tracks.get(currentIndex), cfg.volume, trackElapsedBaseMillis);
+		MinecraftClient.getInstance().getSoundManager().play(currentSound);
+		segmentStartedAt = System.currentTimeMillis();
 	}
 }
